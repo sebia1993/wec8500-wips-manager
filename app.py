@@ -13,7 +13,7 @@ def main():
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except (AttributeError, OSError):
             pass
-    from wec_wips.gui import main as gui_main
+    from wec_wips.profile_ui import main as gui_main
     gui_main(demo_fill=args.demo)
 
 
