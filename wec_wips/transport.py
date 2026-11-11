@@ -5,6 +5,7 @@ permits AP commands; terminal transcripts and credentials are never logged.
 """
 from __future__ import annotations
 
+import codecs
 import ipaddress
 import re
 import threading
@@ -104,7 +105,7 @@ def parse_ap_names(text, secrets=()):
             continue
         if address in seen_names and seen_names[address] != name:
             conflicts.add(address)
-            names.pop(address)
+            names.pop(address, None)
             continue
         seen_names[address] = name
         if name:
@@ -149,6 +150,7 @@ class Session:
         self._names_attempted = False
         self.ap_hostname = ''
         self.hostname_source = ''
+        self._decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
     def set_observer(self, callback):
         """Observe static stage labels and byte activity, never terminal content."""
@@ -167,6 +169,9 @@ class Session:
         while self._channel is not None and not self._channel.closed:
             self._check_stop()
             if not self._channel.recv_ready():
+                if self._decoder.getstate()[0]:
+                    raise TransportError('완성되지 않은 터미널 데이터가 있어 다음 명령을 전송하지 않았습니다.',
+                                         code='UNEXPECTED_DATA')
                 return ''
             raw, _ = self._read_more('')
             total += len(raw)
@@ -195,6 +200,10 @@ class Session:
     def _check_stop(self):
         if self.stop.is_set():
             raise Cancelled("사용자가 작업을 중지했습니다.")
+
+    def _complete_prompt(self, text):
+        # A partial UTF-8 character after a prompt is still pending terminal data.
+        return None if self._decoder.getstate()[0] else _last_prompt(text)
 
     def _validate_connection(self, ap_ip):
         try:
@@ -301,10 +310,10 @@ class Session:
             if new:
                 changed = time.monotonic()
             text = _terminal_text(raw)
-            if _LOGIN.search(text) or _PASSWORD.search(text):
+            if (_LOGIN.search(text) or _PASSWORD.search(text)) and not self._decoder.getstate()[0]:
                 raise TransportError('AP 이름 조회 중 컨트롤러 인증 상태가 변경되었습니다.',
                                      code='CONTROLLER_AUTH_FAILED')
-            if (_last_prompt(text) == self._controller_prompt
+            if (self._complete_prompt(text) == self._controller_prompt
                     and time.monotonic() - changed >= _SETTLE_SECONDS):
                 return text.rstrip()[:-len(self._controller_prompt)].rstrip()
             if self.stop.wait(_POLL_SECONDS):
@@ -313,6 +322,7 @@ class Session:
                              code='COMMAND_TIMEOUT', retryable=True)
 
     def _open_controller_login(self):
+        self._decoder.reset()
         self._observe('stage', {'stage': '컨트롤러 연결'})
         try:
             self._channel = TelnetChannel.connect(
@@ -348,7 +358,7 @@ class Session:
             text = _terminal_text(raw)
             if _AUTH_FAIL.search(text):
                 raise TransportError("컨트롤러 TELNET 인증에 실패했습니다. 자동 재시도하지 않습니다.", code='CONTROLLER_AUTH_FAILED')
-            if _LOGIN.search(text):
+            if _LOGIN.search(text) and not self._decoder.getstate()[0]:
                 if username_sent:
                     raise TransportError("컨트롤러 TELNET ID 입력 요청이 반복되어 중지했습니다.", code='CONTROLLER_AUTH_FAILED')
                 self._send(self.config.controller_user)
@@ -356,7 +366,7 @@ class Session:
                 raw = ""
                 changed = time.monotonic()
                 continue
-            if _PASSWORD.search(text):
+            if _PASSWORD.search(text) and not self._decoder.getstate()[0]:
                 if not username_sent or password_sent:
                     raise TransportError("컨트롤러 TELNET 비밀번호 입력 순서를 확인하지 못했습니다.", code='CONTROLLER_AUTH_FAILED')
                 self._send(self.config.controller_password)
@@ -364,7 +374,7 @@ class Session:
                 raw = ""
                 changed = time.monotonic()
                 continue
-            prompt = _last_prompt(text)
+            prompt = self._complete_prompt(text)
             if prompt and prompt != self.config.controller_password and time.monotonic() - changed >= _SETTLE_SECONDS:
                 if not username_sent or not password_sent:
                     raise TransportError("컨트롤러 TELNET 로그인이 확인되지 않아 AP 접속을 중단했습니다.", code='CONTROLLER_AUTH_FAILED')
@@ -391,7 +401,7 @@ class Session:
             raise TransportError("터미널 연결이 종료되었습니다.", code='CONNECTION_CLOSED', retryable=True)
         if not self._channel_observed:
             self._observe('activity', {})
-        accumulated += chunk.decode("utf-8", errors="replace")
+        accumulated += self._decoder.decode(chunk, final=False)
         if len(accumulated) > _MAX_BYTES:
             raise TransportError("터미널 응답이 허용 크기를 초과했습니다.", code='PROTOCOL_ERROR')
         return accumulated, True
@@ -405,7 +415,7 @@ class Session:
             if new:
                 changed = time.monotonic()
             text = _terminal_text(raw)
-            prompt = _last_prompt(text)
+            prompt = self._complete_prompt(text)
             if prompt and prompt != self.config.controller_password and time.monotonic() - changed >= _SETTLE_SECONDS:
                 if expected is None or prompt == expected:
                     return prompt
@@ -432,7 +442,7 @@ class Session:
             if _NETWORK_FAIL.search(text):
                 raise TransportError("컨트롤러에서 AP SSH 연결에 실패했습니다. AP 주소·포트·경로를 확인하세요.",
                                      code='AP_CONNECT_FAILED', retryable=True)
-            if _QUESTION.search(text):
+            if _QUESTION.search(text) and not self._decoder.getstate()[0]:
                 if trust_answered:
                     raise TransportError("AP 호스트 키 확인이 반복되어 중지했습니다.", code='HOST_KEY_REJECTED')
                 question_line = text.rstrip().rsplit("\n", 1)[-1]
@@ -457,7 +467,7 @@ class Session:
                 changed = time.monotonic()
                 deadline = changed + float(self.config.timeout)
                 continue
-            if _PASSWORD.search(text):
+            if _PASSWORD.search(text) and not self._decoder.getstate()[0]:
                 if password_sent:
                     raise TransportError("AP 비밀번호 인증이 반복되어 중지했습니다.", code='AP_AUTH_FAILED')
                 self._send(self.config.ap_password)
@@ -465,7 +475,7 @@ class Session:
                 raw = ""
                 changed = time.monotonic()
                 continue
-            prompt = _last_prompt(text)
+            prompt = self._complete_prompt(text)
             if prompt and time.monotonic() - changed >= _SETTLE_SECONDS:
                 if prompt == self._controller_prompt:
                     raise TransportError("AP에 연결되지 않고 컨트롤러 프롬프트로 돌아왔습니다.", code='SESSION_NOT_READY')
@@ -543,7 +553,7 @@ class Session:
             if new:
                 changed = time.monotonic()
             text = _terminal_text(raw)
-            prompt = _last_prompt(text)
+            prompt = self._complete_prompt(text)
             if prompt == self._controller_prompt:
                 raise TransportError("AP 세션이 끊겨 컨트롤러로 돌아왔습니다. 적용 여부는 재조회가 필요합니다.",
                                      code='CONNECTION_CLOSED', retryable=True)
@@ -556,6 +566,7 @@ class Session:
                              code='COMMAND_TIMEOUT', retryable=True)
 
     def close(self):
+        self._decoder.reset()
         self._controller_idle = False
         self._ready = False
         self._ap_prompt = None

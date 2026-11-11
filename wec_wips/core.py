@@ -9,7 +9,9 @@ from __future__ import annotations
 import csv
 import ipaddress
 import math
+import os
 import re
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field, fields, replace
@@ -280,11 +282,20 @@ def _safe_cell(value) -> str:
 
 def export_results(path: str | Path, results: list[Result]) -> None:
     names = [f.name for f in fields(Result)]
-    with Path(path).open('w', encoding='utf-8-sig', newline='') as handle:
-        writer = csv.DictWriter(handle, fieldnames=names)
-        writer.writeheader()
-        for result in results:
-            writer.writerow({n: _safe_cell(getattr(result, n)) for n in names})
+    target = Path(path)
+    # Stage beside the destination: a failed write must not truncate a prior export.
+    fd, name = tempfile.mkstemp(prefix='.wips-results-', suffix='.tmp', dir=target.parent)
+    temporary = Path(name)
+    try:
+        with os.fdopen(fd, 'w', encoding='utf-8-sig', newline='') as handle:
+            writer = csv.DictWriter(handle, fieldnames=names)
+            writer.writeheader()
+            for result in results:
+                writer.writerow({n: _safe_cell(getattr(result, n)) for n in names})
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 class DemoSession:
