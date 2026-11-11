@@ -1,0 +1,3 @@
+# Python 3.11+ with Tkinter. No third-party packages required.
+# Controller: standard-library Telnet socket adapter.
+# AP SSH is executed by the WEC8500 CLI, not by this PC.
