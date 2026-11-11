@@ -140,11 +140,13 @@ class Summary:
 def parse_summary(text: str) -> Summary:
     """Parse named fields only: never match an IP from a command echo/banner."""
     clean = ANSI.sub('', text).replace('\r', '')
-    names = {'server_ip': r'wips\s+server\s+ip', 'nat': r'wips\s+nat',
-             'shared_key': r'wips\s+sharedkey', 'mode': r'wips\s+mode'}
+    names = {'server_ip': r'wips[ \t]+server[ \t]+ip', 'nat': r'wips[ \t]+nat',
+             'shared_key': r'wips[ \t]+sharedkey', 'mode': r'wips[ \t]+mode'}
     parsed = {}
     for name, label in names.items():
-        matches = re.findall(r'^\s*' + label + r'(?:\s*[:=]\s*|\s+\.{2,}\s*|\s+)(.*?)\s*$',
+        # A blank field must never consume the next line as its value.
+        matches = re.findall(r'^[ \t]*' + label
+                             + r'(?:[ \t]*[:=][ \t]*|[ \t]+\.{2,}[ \t]*|[ \t]+)(.*?)[ \t]*$',
                              clean, re.I | re.M)
         if len(matches) > 1:
             raise ValueError('조회 결과에 중복 항목이 있어 해석할 수 없습니다.')
