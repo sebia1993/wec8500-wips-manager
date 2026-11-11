@@ -451,7 +451,15 @@ class WipsApp:
         self.status.set("모의 실행 중…" if cfg.demo else "장비 접속 준비 중…")
         self._log("이전 목표로 미완료 작업을 이어갑니다." if resume_results else ("모의 실행을 시작합니다." if cfg.demo else "실제 장비 작업을 시작합니다."))
         self.worker = threading.Thread(target=self._run, args=(cfg, mode, resume_results), name="wips-worker", daemon=False)
-        self.worker.start()
+        try:
+            self.worker.start()
+        except RuntimeError:
+            # No worker can publish its final events when OS thread creation fails.
+            # Preserve prior possible-write evidence before enabling another resume.
+            if resume_results:
+                self.events.put(('worker_partial', {'results': resume_results}))
+            self.events.put(("worker_error", {"message": "작업을 완료하지 못했습니다. 로컬 기록과 결과를 확인하세요. 미완료 이어하기로 다시 조회할 수 있습니다."}))
+            self.events.put(("worker_end", {}))
 
     def _run(self, cfg, mode, resume_results=None):
         runner = None
@@ -699,7 +707,12 @@ class WipsApp:
         self.status.set(f'AP {len(snapshot)}개 결과 파일 저장 중… 창을 닫으면 저장 완료 후 종료합니다.')
         self.worker = threading.Thread(target=self._run_export, args=(kind, destination, snapshot),
                                        name='wips-report-export', daemon=False)
-        self.worker.start()
+        try:
+            self.worker.start()
+        except RuntimeError:
+            # Reuse the existing failure path; results and destination are untouched.
+            self.events.put(('export_error', {}))
+            self.events.put(('export_end', {}))
 
     def _run_export(self, kind, destination, results):
         try:

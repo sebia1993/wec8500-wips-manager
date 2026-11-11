@@ -1,6 +1,6 @@
 # WEC8500 WIPS Manager 1.5.1
 
-> 안정화 빌드 `stabilization.1`: 기능·화면·명령·정책은 유지합니다. 수정 및 검증 범위는 [STABILIZATION.md](STABILIZATION.md)를 참고하세요. Windows 및 실장비 검증은 사용자 확인 대상입니다.
+> 안정화 빌드 `stabilization.2`: 기능·화면·명령·정책은 유지합니다. 수정 및 검증 범위는 [STABILIZATION_2.md](STABILIZATION_2.md)를 참고하세요. Windows 및 실장비 검증은 사용자 확인 대상입니다.
 
 Windows 11에서 사용하는 Python GUI입니다. **PC → WEC8500 Telnet → AP별 SSH** 순서로 접속하여 WIPS 서버 주소와 공유키를 변경하고, 다시 조회한 설정값을 비교합니다.
 
@@ -8,7 +8,7 @@ IP, ID, 비밀번호, 특정키는 실행 화면에 입력합니다. 로그인 I
 
 ## 빠른 시작
 
-EXE 배포본은 ZIP을 압축 해제하고 `WEC8500_WIPS_Manager_v1.5.1_stabilization.1_Win11_x64.exe`를 실행합니다. Python 런타임이 포함되어 있습니다. 아래 설치 절차는 Python 소스 배포본용입니다.
+EXE 배포본은 ZIP을 압축 해제하고 `WEC8500_WIPS_Manager_v1.5.1_stabilization.2_Win11_x64.exe`를 실행합니다. Python 런타임이 포함되어 있습니다. 아래 설치 절차는 Python 소스 배포본용입니다.
 
 
 1. ZIP 전체를 압축 해제합니다. 압축파일 안에서 바로 실행하지 마세요.
@@ -213,7 +213,7 @@ Python 3.13에서 제거된 `telnetlib`도 사용하지 않습니다. 표준 라
 py -3 -m unittest discover -s tests -v
 ```
 
-Linux 개발 환경에서 단위 테스트와 로컬 TCP Telnet 서버를 통한 전체 반복 흐름을 검증합니다. **실제 WEC8500/AP 및 Windows 11 하드웨어에서의 접속 검증은 수행하지 않았습니다.** 원본 검증 기록은 `VALIDATION.md`, 이번 안정화 검증은 `STABILIZATION.md`를 참고하세요.
+Linux 개발 환경에서 단위 테스트와 로컬 TCP Telnet 서버를 통한 전체 반복 흐름을 검증합니다. **실제 WEC8500/AP 및 Windows 11 하드웨어에서의 접속 검증은 수행하지 않았습니다.** 원본 검증 기록은 `VALIDATION.md`, 이번 안정화 검증은 `STABILIZATION_2.md`를 참고하세요.
 
 ## 참고 자료
 
