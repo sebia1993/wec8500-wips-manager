@@ -1,5 +1,7 @@
 # WEC8500 WIPS Manager — Windows 보호 프로필 (profile.4)
 
+> 안정화 진행률 **80%** · [작업 현황과 다음 단계](STABILIZATION_PROGRESS.md) · [8단계 통신 검사 안정화](TRANSPORT_TIMING_STABILITY.md). 실행파일은 profile.4 그대로입니다.
+
 profile.3의 프로필 화면 반영 오류 시 인증정보 혼합을 수정한 누적 검증용 빌드입니다. 새 프로필의 주소와 이전 비밀번호·AP 목록이 섞여 실행되는 경로를 차단했습니다. 새로운 기능은 추가하지 않았습니다.
 
 ## 사용
@@ -24,7 +26,7 @@ profile.3의 프로필 화면 반영 오류 시 인증정보 혼합을 수정한
 전체 검사: `py -3 -m unittest discover -s tests -v`.
 Windows 별도 검사: `py -3 tests/windows_profile_check.py` (합성값·임시 폴더, 장비 접속 없음).
 
-Linux/Xvfb에서 기존 392개와 새 회귀 4개를 포함해 전체 396개씩 두 번 통과했습니다. **Windows EXE·네이티브 DPAPI/잠금/권한/확인창·사내 장비 검증은 미수행**이며 실행파일은 서명되지 않았습니다. 기존 X11 전용 검사 6개는 Windows/macOS에서 건너뛰고 Windows 별도 검사 6개는 위 실행 수에 포함하지 않습니다.
+profile.4 배포본 생성 시 Linux/Xvfb에서 396개씩 두 번 통과했으며, 이후 검사 보강과 8단계 시간 의존성 수정 후에는 전체 407개씩 두 번 통과했습니다. 최신 결과는 TRANSPORT_TIMING_STABILITY.md를 참고하세요. **Windows EXE·네이티브 DPAPI/잠금/권한/확인창·사내 장비 검증은 미수행**이며 실행파일은 서명되지 않았습니다. 기존 X11 전용 검사 6개는 Windows/macOS에서 건너뛰고 Windows 별도 검사 6개는 위 실행 수에 포함하지 않습니다.
 
 기존 `.profile.lock`은 실행 중 삭제하지 마세요. `PROFILE_CHANGED`는 최신 설정을 불러온 뒤 다시 확인하고, `PROFILE_BUSY`는 다른 창의 설정 처리가 끝난 뒤 재시도하세요. 이어하기는 이전 실행의 인증정보와 목표를 유지합니다.
 

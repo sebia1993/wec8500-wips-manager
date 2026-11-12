@@ -1,35 +1,38 @@
-"""Transport tests use an in-memory SSH peer; never connect to equipment."""
+"""In-memory transport tests use protocol time, not host scheduling deadlines."""
 from __future__ import annotations
 
 from collections import deque
 from types import SimpleNamespace
 from unittest.mock import patch
 import tempfile
-import threading
 import time
 import unittest
 
+from transport_test_clock import ProtocolClock, ProtocolEvent
+
 
 class Peer:
-    def __init__(self, replies=None, initial=None):
+    def __init__(self, replies=None, initial=None, *, monotonic=None):
         self.pending = deque(initial or [b"Samsung controller\r\nUser", b"name:"])
         self.replies = replies or {}
         self.sent = []
         self.closed = False
         self.ready_at = 0.0
         self.timeout = None
+        # Other tests importing Peer retain real time unless explicitly opted in.
+        self.monotonic = monotonic or time.monotonic
         self.peer = self
         self.connect_count = 0
         self.kwargs = None
 
     def recv_ready(self):
-        return bool(self.pending) and time.monotonic() >= self.ready_at
+        return bool(self.pending) and self.monotonic() >= self.ready_at
 
     def recv(self, count):
         item = self.pending.popleft()
         if isinstance(item, tuple):
             delay, payload = item
-            self.ready_at = time.monotonic() + delay
+            self.ready_at = self.monotonic() + delay
             return payload
         return item
 
@@ -59,7 +62,13 @@ class TransportTests(unittest.TestCase):
             timeout=0.5,
             auto_accept_ap_host_key=False,
         )
-        self.stop = threading.Event()
+        self.clock = ProtocolClock()
+        self.stop = ProtocolEvent(self.clock)
+        # Patch the module reference, not time.monotonic on the shared time module.
+        # Real socket integration/GUI tests keep their own actual clock.
+        clock_patch = patch("wec_wips.transport.time", self.clock)
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
         self.prompts = []
 
     def tearDown(self):
@@ -68,6 +77,7 @@ class TransportTests(unittest.TestCase):
 
     def make(self, peer, approval=True):
         from wec_wips.transport import Session
+        peer.monotonic = self.clock.monotonic
         def connect(**kwargs):
             peer.connect_count += 1
             peer.kwargs = kwargs
@@ -264,9 +274,7 @@ class TransportTests(unittest.TestCase):
         peer = self.peer(**{"show config wips summary\n": []})
         session, _ = self.make(peer)
         session.connect("192.0.2.11")
-        timer = threading.Timer(0.03, self.stop.set)
-        timer.start()
-        self.addCleanup(timer.cancel)
+        self.clock.call_later(0.03, self.stop.set)
         with self.assertRaises(Cancelled):
             session.execute("show config wips summary")
         self.assertTrue(peer.closed)
