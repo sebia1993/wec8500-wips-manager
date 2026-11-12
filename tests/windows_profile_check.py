@@ -53,6 +53,42 @@ class WindowsProfileChecks(unittest.TestCase):
         p=self.store.load();self.assertEqual(self.store.secret(p,'ap_password',p.settings),'SecondSynthetic')
         self.store.delete();self.assertIsNone(self.store.load())
 
+    def test_native_stale_window_cannot_revert_or_delete_new_secrets(self):
+        self.store.save(self.data, ap_password='OriginalSynthetic')
+        old = ProfileStore(Path(self.tmp.name)); old.load()
+        self.store.save(self.data, ap_password='RotatedSynthetic')
+        with self.assertRaises(ProfileError) as caught:
+            old.save(self.data, ap_password='OriginalSynthetic')
+        self.assertEqual(caught.exception.code, 'PROFILE_CHANGED')
+        with self.assertRaises(ProfileError):
+            old.delete()
+        current = self.store.load()
+        self.assertEqual(self.store.secret(current, 'ap_password', current.settings), 'RotatedSynthetic')
+
+    def test_native_lock_excludes_a_second_process(self):
+        import subprocess
+        from wec_wips.profile_lock import exclusive_profile_lock
+        self.store.save(self.data)
+        script = """
+from pathlib import Path
+import sys
+from wec_wips.profile_store import ProfileStore, ProfileError
+s=ProfileStore(Path(sys.argv[1]));p=s.load()
+try:
+    s.save(p.settings)
+except ProfileError as e:
+    print(e.code)
+else:
+    print('UNEXPECTED_WRITE')
+"""
+        with exclusive_profile_lock(Path(self.tmp.name)):
+            result = subprocess.run([sys.executable, '-c', script, self.tmp.name],
+                                    cwd=Path(__file__).resolve().parents[1],
+                                    capture_output=True, text=True, timeout=10)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'PROFILE_BUSY')
+        self.store.save(self.data)  # OS lock released, not a permanent PID lock.
+
 if __name__=='__main__':
     if sys.platform != 'win32':
         print('NOT RUN: native Windows DPAPI requires Windows. No fallback is used.')

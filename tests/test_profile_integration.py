@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from test_gui import destroy_test_root
+from profile_test_support import drain_profile
 from test_integration import _TelnetController
 from test_profile_store import TokenProtector, settings
 from wec_wips.profile_store import ProfileStore
@@ -29,6 +30,7 @@ class ProfileIntegrationTests(unittest.TestCase):
             app=None
             try:
                 app=ProfileApp(root,store=store)
+                drain_profile(app)
                 self.assertEqual(crypto.calls,[])
                 self.assertEqual(server.tcp_connections,0)
                 app.controller_user.set('controlleradmin')

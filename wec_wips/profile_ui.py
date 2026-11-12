@@ -1,12 +1,16 @@
 """Optional Windows profile layer around the unchanged, stabilized WipsApp."""
 from __future__ import annotations
 
+import copy
+import queue
+import threading
 import tkinter as tk
 from tkinter import messagebox, ttk
 
-from .core import RunConfig, _ipv4, parse_ap_ips
+from .core import GOOD_STATUSES, RunConfig, _ipv4, parse_ap_ips
 from .gui import WipsApp, NAT, SYNTAX
 from .profile_store import ProfileError, ProfileStore, binding, normalize_settings
+from .profile_tasks import RunRequest, SaveRequest, prepare_run, save_profile, run_profile_job
 
 _AUTO = object()
 
@@ -14,6 +18,14 @@ _AUTO = object()
 class ProfileApp(WipsApp):
     def __init__(self, root, *, store=_AUTO, load_profile=True):
         self._profile = None
+        self._profile_revision = None
+        self._profile_busy = False
+        self._profile_worker = None
+        self._profile_events = queue.Queue()
+        self._profile_token = 0
+        self._profile_completion = None
+        self._profile_close_requested = False
+        self._last_profile_error = ''
         self._loading_profile = False
         self._profile_notice = ''
         if store is _AUTO:
@@ -24,7 +36,7 @@ class ProfileApp(WipsApp):
                 self._profile_notice = str(exc)
         self.profile_store = store
         super().__init__(root)
-        self.root.title("WEC8500 WIPS Manager v1.5.1 · profile.1 · Windows 보호 프로필")
+        self.root.title("WEC8500 WIPS Manager v1.5.1 · profile.2 · Windows 보호 프로필")
         for variable in (self.controller_ip, self.controller_port, self.ap_user,
                          self.ap_port, self.server_ip):
             variable.trace_add('write', self._profile_context_changed)
@@ -94,7 +106,9 @@ class ProfileApp(WipsApp):
             widget.configure(state='normal' if available and matched else 'disabled')
 
     def _set_busy(self, busy):
-        super()._set_busy(busy)
+        super()._set_busy(busy or self._profile_busy)
+        if self._profile_busy:
+            self.stop_button.configure(state='disabled')
         self._sync_profile_controls()
 
     def _fill_demo(self):
@@ -122,62 +136,175 @@ class ProfileApp(WipsApp):
         except (ValueError, KeyError):
             raise ProfileError('프로필의 IP·포트·AP 계정·옵션·대상 목록을 확인하세요.') from None
 
-    def _snapshot(self, mode):
+    def _capture_run_request(self, mode):
+        """Read/validate Tk variables on main thread; do not touch disk or DPAPI."""
         password = self.ap_password.get()
         key = self.shared_key.get()
-        use_ap = not password and self.use_saved_ap.get()
-        use_key = mode == 'apply' and not key and self.use_saved_key.get()
-        if self.demo.get() or not (use_ap or use_key):
-            return super()._snapshot(mode)
-        # Mirror the existing form snapshot; persistence validation must not make
-        # unused NAT/target fields mandatory for a query-only operation.
+        use_ap = not self.demo.get() and not password and self.use_saved_ap.get()
+        use_key = not self.demo.get() and mode == 'apply' and not key and self.use_saved_key.get()
+        if not (use_ap or use_key):
+            cfg = super()._snapshot(mode)
+        else:
+            try:
+                controller_port = int(self.controller_port.get().strip())
+                ap_port = int(self.ap_port.get().strip())
+                timeout = float(self.timeout.get().strip())
+            except ValueError:
+                raise ValueError('Telnet·SSH 포트와 응답 제한에는 숫자를 입력하세요.') from None
+            ips = parse_ap_ips(self.ap_text.get('1.0', 'end'))
+            cfg = RunConfig(
+                controller_ip=self.controller_ip.get().strip(), controller_port=controller_port,
+                controller_user=self.controller_user.get().strip(), controller_password=self.controller_password.get(),
+                ap_ips=ips, ap_port=ap_port, ap_user=self.ap_user.get().strip(),
+                ap_password='SavedValueValidationOnly' if use_ap else password,
+                server_ip=self.server_ip.get().strip(), shared_key='SavedValueValidationOnly' if use_key else key,
+                syntax=SYNTAX[self.syntax.get()], nat_mode=NAT[self.nat_mode.get()], timeout=timeout,
+                demo=False, stop_on_error=self.stop_on_error.get(), auto_recover=self.auto_recover.get(),
+                auto_accept_ap_host_key=self.auto_accept_ap_host_key.get(),
+                lookup_hostnames=self.lookup_hostnames.get(),
+                ap_hostnames={ip:self.ap_hostnames[ip] for ip in ips if ip in self.ap_hostnames})
+            cfg.validate(mode)
+            if self.profile_store is None or self._profile is None:
+                raise ProfileError('저장된 정보가 없습니다. 직접 입력하세요.')
+        return RunRequest(cfg, mode, copy.deepcopy(self._profile) if not cfg.demo else None,
+                          use_ap, use_key)
+
+    def _start(self, mode):
+        if self.busy or self.closing or self._profile_close_requested:
+            return
         try:
-            controller_port = int(self.controller_port.get().strip())
-            ap_port = int(self.ap_port.get().strip())
-            timeout = float(self.timeout.get().strip())
-        except ValueError:
-            raise ValueError('Telnet·SSH 포트와 응답 제한에는 숫자를 입력하세요.') from None
-        ips = parse_ap_ips(self.ap_text.get('1.0', 'end'))
-        cfg = RunConfig(
-            controller_ip=self.controller_ip.get().strip(), controller_port=controller_port,
-            controller_user=self.controller_user.get().strip(), controller_password=self.controller_password.get(),
-            ap_ips=ips, ap_port=ap_port, ap_user=self.ap_user.get().strip(),
-            ap_password='SavedValueValidationOnly' if use_ap else password,
-            server_ip=self.server_ip.get().strip(), shared_key='SavedValueValidationOnly' if use_key else key,
-            syntax=SYNTAX[self.syntax.get()], nat_mode=NAT[self.nat_mode.get()], timeout=timeout,
-            demo=False, stop_on_error=self.stop_on_error.get(), auto_recover=self.auto_recover.get(),
-            auto_accept_ap_host_key=self.auto_accept_ap_host_key.get(),
-            lookup_hostnames=self.lookup_hostnames.get(),
-            ap_hostnames={ip:self.ap_hostnames[ip] for ip in ips if ip in self.ap_hostnames})
-        cfg.validate(mode)
-        if self.profile_store is None or self._profile is None:
-            raise ProfileError('저장된 정보가 없습니다. 직접 입력하세요.')
-        # Bind secrets only to endpoints/identity, not unrelated operation options.
-        context = dict(controller_ip=cfg.controller_ip, controller_port=cfg.controller_port,
-                       ap_user=cfg.ap_user, ap_port=cfg.ap_port,
-                       server_ip=cfg.server_ip if use_key else '')
-        if use_ap:
-            cfg.ap_password = self.profile_store.secret(self._profile, 'ap_password', context)
-        if use_key:
-            cfg.shared_key = self.profile_store.secret(self._profile, 'shared_key', context)
-        cfg.validate(mode)
-        return cfg
+            request = self._capture_run_request(mode)
+        except ValueError as exc:
+            messagebox.showerror('입력값 확인', str(exc), parent=self.root)
+            return
+        if mode == 'apply' and not self._confirm_apply(request.config):
+            return
+        if self.results and not messagebox.askyesno(
+                '이전 결과 교체', '새 작업을 시작하면 화면의 이전 결과가 교체됩니다.\n필요한 결과는 먼저 CSV로 저장하세요.\n새 작업을 시작할까요?',
+                parent=self.root, default='no'):
+            return
+        if request.profile is None and not (request.use_ap or request.use_key):
+            self._begin(request.config, mode)
+            return
+        store = self.profile_store
+        self._launch_profile_job('prepare', lambda: prepare_run(store, request),
+                                 lambda cfg: self._begin(cfg, mode))
+
+    def _resume(self):
+        if self.busy or self.saved_config is None or self.closing:
+            return
+        complete = {r.ap_ip for r in self.results if r.status in GOOD_STATUSES}
+        if all(ip in complete for ip in self.saved_config.ap_ips):
+            return super()._resume()
+        if not messagebox.askyesno(
+                '이전 인증정보로 이어하기',
+                '이어하기는 이전 실행의 WEC8500/AP 비밀번호와 목표 설정을 사용합니다.\n'
+                '저장 프로필이나 화면에서 바꾼 새 비밀번호는 반영되지 않습니다.\n'
+                '이전 변경 전송 여부와 검증 근거를 유지한 채 계속할까요?',
+                parent=self.root, default='no'):
+            return
+        # Do not replace saved_config or uncertain-write evidence with new data.
+        super()._resume()
+
+    def _launch_profile_job(self, action, work, complete, *, silent=False):
+        if self.busy or self.closing or self._profile_close_requested:
+            return False
+        self._profile_token += 1
+        token = self._profile_token
+        self._profile_busy = True
+        self._last_profile_error = ''
+        self._profile_completion = (action, complete, silent)
+        self.phase, self.retry_until = '', None
+        self._set_busy(True)
+        labels = {'load':'저장 설정 불러오는 중', 'save':'설정 보호·저장 중',
+                  'delete':'저장 설정 삭제 중', 'prepare':'저장 설정 확인·인증정보 준비 중'}
+        self.profile_status.set(labels[action] + '… 자동 접속하지 않습니다.')
+        try:
+            self._profile_worker = threading.Thread(
+                target=run_profile_job, args=(self._profile_events, token, work),
+                name='wips-profile-' + action, daemon=False)
+            self._profile_worker.start()
+        except Exception:
+            self._profile_worker = None
+            self._profile_events.put((token, None, ProfileError(code='PROFILE_WORKER_FAILED')))
+        return True
+
+    def _finish_profile_job(self, value, error):
+        action, complete, silent = self._profile_completion
+        self._profile_completion = None
+        self._profile_worker = None
+        self._profile_busy = False
+        self._set_busy(False)
+        if self._profile_close_requested:
+            if error is not None and action in ('save', 'delete'):
+                # Do not silently close on persistence failure: keep the operator's
+                # input and show the error so retry/manual recovery remains possible.
+                self._profile_close_requested = False
+            else:
+                # Saving may have committed; never start a prepared device job on close.
+                self.closing = True
+                return
+        if error is not None:
+            self._last_profile_error = error.code
+            if action == 'load':
+                self._profile = None
+                self._profile_revision = self.profile_store.observed_revision
+                self.use_saved_ap.set(False)
+                self.use_saved_key.set(False)
+            elif error.code == 'PROFILE_CHANGED':
+                self.use_saved_ap.set(False)
+                self.use_saved_key.set(False)
+            self.profile_status.set(str(error))
+            self._sync_profile_controls()
+            if not silent:
+                messagebox.showerror('저장 설정 확인', str(error), parent=self.root)
+            return
+        complete(value)
+
+    def _pump(self):
+        try:
+            # A completion may be posted just before the thread returns. Wait until
+            # it is actually finished before enabling any next operation.
+            if self._profile_busy and (self._profile_worker is None or not self._profile_worker.is_alive()):
+                try:
+                    token, value, error = self._profile_events.get_nowait()
+                except queue.Empty:
+                    pass
+                else:
+                    if token == self._profile_token:
+                        self._finish_profile_job(value, error)
+        except Exception:
+            self._last_profile_error = 'PROFILE_WORKER_FAILED'
+            self._profile_busy = False
+            self._profile_completion = None
+            self.profile_status.set(str(ProfileError(code='PROFILE_WORKER_FAILED')))
+            self._set_busy(False)
+        super()._pump()
+
+    def _close(self):
+        if self._profile_busy:
+            if self._profile_close_requested:
+                return
+            if messagebox.askyesno('설정 처리 중 종료',
+                    '현재 설정 처리를 마친 뒤 종료할까요?\n암호화·파일 처리를 강제 중단하지 않으며 준비 중인 장비 작업은 시작하지 않습니다.',
+                    parent=self.root, default='no'):
+                self._profile_close_requested = True
+                self.profile_status.set('설정 처리 완료 후 종료합니다. 장비 작업은 시작하지 않습니다.')
+            return
+        super()._close()
 
     def _load_profile(self, silent=False):
         if self.busy or self.profile_store is None:
             return
-        try:
-            profile = self.profile_store.load()
-        except ProfileError as exc:
-            self._profile = None
-            self.use_saved_ap.set(False); self.use_saved_key.set(False)
-            self.profile_status.set(str(exc))
-            self._sync_profile_controls()
-            if not silent:
-                messagebox.showerror('저장 설정 확인', str(exc), parent=self.root)
-            return
+        store = self.profile_store
+        self._launch_profile_job('load', store.load, self._apply_loaded_profile, silent=silent)
+
+    def _apply_loaded_profile(self, profile):
+        self._profile_revision = profile.revision if profile is not None else None
         if profile is None:
             self._profile = None
+            self.use_saved_ap.set(False)
+            self.use_saved_key.set(False)
             self.profile_status.set('저장된 기본 프로필이 없습니다. 처음 한 번 입력하고 설정 저장을 누르세요.')
             self._sync_profile_controls()
             return
@@ -207,28 +334,33 @@ class ProfileApp(WipsApp):
             raise ProfileError('작업 중이거나 저장을 지원하지 않는 환경입니다.')
         if self.demo.get():
             raise ProfileError('모의 데이터는 실장비 프로필에 저장하지 않습니다. 실장비 설정을 입력하세요.')
-        if any(type(value) is not bool for value in (save_ap,save_key,save_targets)):
+        if any(type(value) is not bool for value in (save_ap, save_key, save_targets)):
             raise ProfileError('저장 항목을 확인하세요.')
         data = self._collect_settings(include_targets=save_targets)
         selected = {}
-        for kind, wanted, variable, use in (('ap_password',save_ap,self.ap_password,self.use_saved_ap),
-                                           ('shared_key',save_key,self.shared_key,self.use_saved_key)):
+        for kind, wanted, variable, use in (('ap_password', save_ap, self.ap_password, self.use_saved_ap),
+                                           ('shared_key', save_key, self.shared_key, self.use_saved_key)):
             if not wanted:
                 continue
             value = variable.get()
-            if not value:
-                if self._profile is None or not use.get():
-                    raise ProfileError('저장할 AP 비밀번호 또는 공유키를 직접 입력하세요.')
-                value = self.profile_store.secret(self._profile,kind,data)
-            selected[kind] = value
-        # Do not replace in-memory profile until the complete encrypted file is committed.
-        profile = self.profile_store.save(data, **selected)
-        self._profile = profile
-        self.use_saved_ap.set(save_ap); self.use_saved_key.set(save_key)
-        if save_ap: self.ap_password.set('')
-        if save_key: self.shared_key.set('')
-        self.profile_status.set('기본 프로필 저장 완료. WEC8500 ID·비밀번호는 저장하지 않았습니다. 선택하지 않은 비밀정보는 저장소에서 제외했습니다.')
-        self._sync_profile_controls()
+            if not value and (self._profile is None or not use.get()):
+                raise ProfileError('저장할 AP 비밀번호 또는 공유키를 직접 입력하세요.')
+            selected[kind] = value or None
+        request = SaveRequest(copy.deepcopy(data), copy.deepcopy(self._profile),
+                              self._profile_revision, selected)
+        store = self.profile_store
+        def completed(profile):
+            self._profile = profile
+            self._profile_revision = profile.revision
+            self.use_saved_ap.set(save_ap)
+            self.use_saved_key.set(save_key)
+            if save_ap:
+                self.ap_password.set('')
+            if save_key:
+                self.shared_key.set('')
+            self.profile_status.set('기본 프로필 저장 완료. WEC8500 ID·비밀번호는 저장하지 않았습니다. 이어하기는 이전 실행의 인증정보를 유지합니다.')
+            self._sync_profile_controls()
+        self._launch_profile_job('save', lambda: save_profile(store, request), completed)
 
     def _save_profile_dialog(self):
         if self.busy or self.profile_store is None:
@@ -267,18 +399,20 @@ class ProfileApp(WipsApp):
     def _delete_profile(self):
         if self.busy or self.profile_store is None:
             return
-        if not messagebox.askyesno('저장 설정 삭제', '일반 설정과 암호화된 AP 비밀번호·공유키를 삭제할까요?\n보고서와 이 창의 이전 작업 이어하기 정보는 삭제하지 않습니다.', parent=self.root,default='no'):
+        if not messagebox.askyesno('저장 설정 삭제', '일반 설정과 암호화된 AP 비밀번호·공유키를 삭제할까요?\n보고서와 이 창의 이전 작업 이어하기 정보는 삭제하지 않습니다.', parent=self.root, default='no'):
             return
-        try:
-            self.profile_store.delete()
-        except ProfileError as exc:
-            messagebox.showerror('삭제 실패',str(exc),parent=self.root)
-            return
-        self._profile=None
-        self.use_saved_ap.set(False);self.use_saved_key.set(False)
-        self.ap_password.set('');self.shared_key.set('')
-        self.profile_status.set('저장된 프로필을 삭제했습니다. 현재 일반 입력값·이전 결과는 유지되며 비밀정보는 다시 입력해야 합니다.')
-        self._sync_profile_controls()
+        store = self.profile_store
+        revision = self._profile_revision
+        def completed(_):
+            self._profile = None
+            self._profile_revision = None
+            self.use_saved_ap.set(False)
+            self.use_saved_key.set(False)
+            self.ap_password.set('')
+            self.shared_key.set('')
+            self.profile_status.set('저장 프로필을 삭제했습니다. 현재 일반 입력값·이전 결과는 유지되며 비밀정보는 다시 입력해야 합니다.')
+            self._sync_profile_controls()
+        self._launch_profile_job('delete', lambda: store.delete(expected_revision=revision), completed)
 
 
 def main(demo_fill=False):

@@ -82,14 +82,16 @@ class ProfileStoreTests(unittest.TestCase):
             with self.assertRaises(self.Error) as err: self.store.save(settings(),ap_password='SYNTHETIC_AP_PASSWORD')
         self.assertNotIn('SYNTHETIC_AP_PASSWORD',str(err.exception))
         self.assertEqual(self.store.path.read_bytes(), original)
-        self.assertEqual(list(self.root.iterdir()),[self.store.path])
+        self.assertEqual(set(self.root.iterdir()), {self.store.path, self.root / '.profile.lock'})
+        self.assertEqual((self.root / '.profile.lock').read_bytes(), b'')
 
     def test_replace_failure_preserves_previous_file_and_cleans_temp(self):
         self.store.save(settings()); original=self.store.path.read_bytes()
         with patch('wec_wips.profile_store.os.replace',side_effect=PermissionError('secret path')):
             with self.assertRaises(self.Error): self.store.save(settings(),ap_password='SyntheticAP')
         self.assertEqual(self.store.path.read_bytes(),original)
-        self.assertEqual(list(self.root.iterdir()),[self.store.path])
+        self.assertEqual(set(self.root.iterdir()), {self.store.path, self.root / '.profile.lock'})
+        self.assertEqual((self.root / '.profile.lock').read_bytes(), b'')
 
     def test_each_endpoint_change_blocks_stored_ap_secret_before_decrypt(self):
         p=self.store.save(settings(),ap_password='SyntheticAP')
