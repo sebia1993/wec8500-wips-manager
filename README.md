@@ -1,6 +1,6 @@
 # WEC8500 WIPS Manager — Windows 보호 프로필 (profile.4)
 
-> **개발·안정화 100% (8/8단계)** · GitHub 릴리스 게시 포함 **약 89% (8/9단계)** · [진행 현황](STABILIZATION_PROGRESS.md). Windows·사내 실검증은 사용자 별도 수행이며 진행률 산정에서 제외합니다. 릴리스는 아직 게시되지 않았습니다. 실행파일은 profile.4 그대로입니다.
+> **개발·안정화 및 GitHub 배포 100% (9/9단계 완료)** · [진행 현황](STABILIZATION_PROGRESS.md). Windows·사내 실검증은 사용자 별도 수행이며 진행률 산정에서 제외합니다. 현재 `v1.5.1-profile.4` pre-release가 게시되어 있고, 직접 첨부된 배포 파일은 Windows 실행파일 ZIP 1개입니다.
 
 profile.3의 프로필 화면 반영 오류 시 인증정보 혼합을 수정한 누적 검증용 빌드입니다. 새 프로필의 주소와 이전 비밀번호·AP 목록이 섞여 실행되는 경로를 차단했습니다. 새로운 기능은 추가하지 않았습니다.
 
@@ -26,12 +26,14 @@ profile.3의 프로필 화면 반영 오류 시 인증정보 혼합을 수정한
 전체 검사: `py -3 -m unittest discover -s tests -v`.
 Windows 별도 검사: `py -3 tests/windows_profile_check.py` (합성값·임시 폴더, 장비 접속 없음).
 
-이번 릴리스 준비에서 Linux/Xvfb의 전체 424개 회귀 검사를 다시 실행해 실패·오류·건너뜀 없이 통과했습니다. 누적 변경 및 검증 범위는 RELEASE_NOTES_PROFILE4.md를 참고하세요. **Windows EXE·네이티브 DPAPI/잠금/권한/확인창·사내 장비 검증은 미수행**이며 실행파일은 서명되지 않았습니다. 기존 X11 전용 검사 6개는 Windows/macOS에서 건너뛰고 Windows 별도 검사 6개는 위 실행 수에 포함하지 않습니다.
+릴리스 준비 과정에서 Linux/Xvfb의 전체 424개 회귀 검사를 실행해 실패·오류·건너뜀 없이 통과했습니다. 누적 변경 및 검증 범위는 RELEASE_NOTES_PROFILE4.md를 참고하세요. **Windows EXE·네이티브 DPAPI/잠금/권한/확인창·사내 장비 검증은 사용자 별도 확인 범위**이며 실행파일은 서명되지 않았습니다. 기존 X11 전용 검사 6개는 Windows/macOS에서 건너뛰고 Windows 별도 검사 6개는 위 실행 수에 포함하지 않습니다.
 
 기존 `.profile.lock`은 실행 중 삭제하지 마세요. `PROFILE_CHANGED`는 최신 설정을 불러온 뒤 다시 확인하고, `PROFILE_BUSY`는 다른 창의 설정 처리가 끝난 뒤 재시도하세요. 이어하기는 이전 실행의 인증정보와 목표를 유지합니다.
 
 현재 Windows 사용자 권한의 악성코드까지 차단하는 앱 전용 금고는 아닙니다. Telnet 구간과 조회 공유키 원문 보고서는 별도 관리 대상이며 사내 저장 정책을 따라 사용하세요.
 
-## 릴리스 준비 상태
+## 릴리스 상태
 
-릴리스 태그 계획은 `v1.5.1-profile.4`이며, 검증용 pre-release로 준비합니다. [릴리스 설명](RELEASE_NOTES_PROFILE4.md)에 변경 내용과 미검증 항목을 구분했습니다. 현재 도구로 GitHub 릴리스 생성 및 파일 첨부를 직접 수행하지 못해 실제 게시는 미완료입니다. 문서 추가나 커밋을 릴리스 게시 완료로 계산하지 않습니다. 사내 검증을 이 배포 작업의 대기 조건으로 두지 않습니다.
+`v1.5.1-profile.4` pre-release가 게시되어 있습니다. **직접 첨부된 배포 파일은 `WEC8500_WIPS_Manager_v1.5.1_profile.4_Win11_x64.zip` 1개만 유지합니다.** GitHub 화면의 Source code (zip) / Source code (tar.gz)는 태그에서 자동 생성되는 항목입니다.
+
+사내 검증은 이 배포 작업의 완료 조건에 포함하지 않으며, 사용자 환경에서 발견되는 문제는 별도 안정화 피드백으로 처리합니다.
