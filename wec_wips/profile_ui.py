@@ -25,6 +25,7 @@ class ProfileApp(WipsApp):
         self._profile_token = 0
         self._profile_completion = None
         self._profile_close_requested = False
+        self._profile_close_dialog = False
         self._last_profile_error = ''
         self._loading_profile = False
         self._profile_notice = ''
@@ -36,7 +37,7 @@ class ProfileApp(WipsApp):
                 self._profile_notice = str(exc)
         self.profile_store = store
         super().__init__(root)
-        self.root.title("WEC8500 WIPS Manager v1.5.1 · profile.2 · Windows 보호 프로필")
+        self.root.title("WEC8500 WIPS Manager v1.5.1 · profile.3 · Windows 보호 프로필")
         for variable in (self.controller_ip, self.controller_port, self.ap_user,
                          self.ap_port, self.server_ip):
             variable.trace_add('write', self._profile_context_changed)
@@ -265,7 +266,8 @@ class ProfileApp(WipsApp):
         try:
             # A completion may be posted just before the thread returns. Wait until
             # it is actually finished before enabling any next operation.
-            if self._profile_busy and (self._profile_worker is None or not self._profile_worker.is_alive()):
+            if (self._profile_busy and not self._profile_close_dialog
+                    and (self._profile_worker is None or not self._profile_worker.is_alive())):
                 try:
                     token, value, error = self._profile_events.get_nowait()
                 except queue.Empty:
@@ -283,13 +285,20 @@ class ProfileApp(WipsApp):
 
     def _close(self):
         if self._profile_busy:
-            if self._profile_close_requested:
+            if self._profile_close_requested or self._profile_close_dialog:
                 return
-            if messagebox.askyesno('설정 처리 중 종료',
-                    '현재 설정 처리를 마친 뒤 종료할까요?\n암호화·파일 처리를 강제 중단하지 않으며 준비 중인 장비 작업은 시작하지 않습니다.',
-                    parent=self.root, default='no'):
-                self._profile_close_requested = True
-                self.profile_status.set('설정 처리 완료 후 종료합니다. 장비 작업은 시작하지 않습니다.')
+            # Tk modal dialogs run a nested event loop. Keep the completion queued
+            # until this decision is recorded, or preparation could start a device
+            # job while the operator is still deciding whether to close.
+            self._profile_close_dialog = True
+            try:
+                if messagebox.askyesno('설정 처리 중 종료',
+                        '현재 설정 처리를 마친 뒤 종료할까요?\n암호화·파일 처리를 강제 중단하지 않으며 준비 중인 장비 작업은 시작하지 않습니다.',
+                        parent=self.root, default='no'):
+                    self._profile_close_requested = True
+                    self.profile_status.set('설정 처리 완료 후 종료합니다. 장비 작업은 시작하지 않습니다.')
+            finally:
+                self._profile_close_dialog = False
             return
         super()._close()
 
