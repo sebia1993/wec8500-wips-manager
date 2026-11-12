@@ -37,7 +37,7 @@ class ProfileApp(WipsApp):
                 self._profile_notice = str(exc)
         self.profile_store = store
         super().__init__(root)
-        self.root.title("WEC8500 WIPS Manager v1.5.1 · profile.3 · Windows 보호 프로필")
+        self.root.title("WEC8500 WIPS Manager v1.5.1 · profile.4 · Windows 보호 프로필")
         for variable in (self.controller_ip, self.controller_port, self.ap_user,
                          self.ap_port, self.server_ip):
             variable.trace_add('write', self._profile_context_changed)
@@ -309,8 +309,8 @@ class ProfileApp(WipsApp):
         self._launch_profile_job('load', store.load, self._apply_loaded_profile, silent=silent)
 
     def _apply_loaded_profile(self, profile):
-        self._profile_revision = profile.revision if profile is not None else None
         if profile is None:
+            self._profile_revision = None
             self._profile = None
             self.use_saved_ap.set(False)
             self.use_saved_key.set(False)
@@ -319,20 +319,29 @@ class ProfileApp(WipsApp):
             return
         self._loading_profile = True
         try:
-            self._profile = profile
+            # A Tcl update can fail after only part of the form is replaced.
+            # Revoke old live credentials before changing any connection target,
+            # and publish the new profile only after every form update succeeds.
+            # Previous run snapshots/results and the on-disk profile are untouched.
+            self._profile = None
+            self.use_saved_ap.set(False)
+            self.use_saved_key.set(False)
+            for variable in (self.controller_user,self.controller_password,self.ap_password,self.shared_key):
+                variable.set('')
+            self.ap_hostnames = {}
+            self.ap_text.delete('1.0', 'end')
             for name in ('controller_ip','controller_port','ap_user','ap_port','server_ip','timeout',
                          'auto_recover','stop_on_error','auto_accept_ap_host_key','lookup_hostnames'):
                 getattr(self, name).set(profile.settings[name])
             self.syntax.set(next(label for label,value in SYNTAX.items() if value == profile.settings['syntax']))
             self.nat_mode.set(next(label for label,value in NAT.items() if value == profile.settings['nat_mode']))
-            self.ap_text.delete('1.0', 'end')
             self.ap_text.insert('1.0', '\n'.join(profile.settings['ap_ips']))
             self.ap_hostnames = dict(profile.settings['ap_hostnames'])
-            for variable in (self.controller_user,self.controller_password,self.ap_password,self.shared_key):
-                variable.set('')
             self.demo.set(False)
             self.use_saved_ap.set('ap_password' in profile.secrets)
             self.use_saved_key.set('shared_key' in profile.secrets)
+            self._profile = profile
+            self._profile_revision = profile.revision
         finally:
             self._loading_profile = False
         self.profile_status.set('실장비 기본 프로필을 불러왔습니다. WEC8500 ID·비밀번호와 AP 대상을 확인한 뒤 실행하세요. 자동 접속하지 않습니다.')
