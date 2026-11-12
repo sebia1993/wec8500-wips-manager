@@ -19,18 +19,19 @@ Windows 사용자 보호 프로필과 누적 안정화 수정이 포함된 검�
 - 종료 확인창 경합과 프로필의 부분 화면 반영 실패 시 잘못된 접속 방지.
 - 통신 모의검사 시계 분리. 실제 장비 대기시간·명령·복구 정책은 변경하지 않음.
 
-## 첨부 파일
+## 배포 파일
 
-- `WEC8500_WIPS_Manager_v1.5.1_profile.4_Win11_x64.zip`: Python 포함 Windows 실행파일.
-- `WEC8500_WIPS_Manager_Python_v1.5.1_profile.4_release.zip`: 릴리스 기준 최신 소스·테스트·문서.
-- `WEC8500_Windows_Validation_Kit_profile4.zip`: 사용자 별도 실행용 합성 Windows 보호 검사 6개. 선택 자료이며 업무 프로그램이 아님.
-- `SHA256SUMS.txt`: 업로드 파일 SHA-256 확인값.
+GitHub Release에 직접 첨부된 파일은 아래 **1개**입니다.
+
+- `WEC8500_WIPS_Manager_v1.5.1_profile.4_Win11_x64.zip`: Python 런타임과 Windows 실행파일을 포함한 배포 ZIP.
+
+GitHub 화면에 표시되는 Source code (zip) / Source code (tar.gz)는 릴리스 태그에서 GitHub가 자동 생성하는 소스 아카이브이며 수동 첨부파일이 아닙니다.
 
 ## 검증 범위
 
-기존 개발 검증에서 Linux/Xvfb 기준 424개씩 2회 통과했고, 이번 릴리스 준비에서도 전체 424개를 다시 실행하여 실패·오류·건너뜀 없이 통과했습니다(76.274초). Windows ZIP CRC, EXE 해시 및 앱 15개 파일의 소스 일치 여부도 확인했습니다. 실제 Windows 실행 검증은 아닙니다.
+기존 개발 검증에서 Linux/Xvfb 기준 424개씩 2회 통과했고, 릴리스 준비에서도 전체 424개를 다시 실행하여 실패·오류·건너뜀 없이 통과했습니다(76.274초). Windows ZIP CRC, EXE 해시 및 앱 15개 파일의 소스 일치 여부도 확인했습니다. 실제 Windows 실행 검증은 아닙니다.
 
-**Windows EXE의 실제 실행, 네이티브 DPAPI·파일 잠금·ACL·사내 WEC8500/AP 검증은 수행하지 않았습니다.** 실행파일은 디지털 서명이 없습니다. 개발 완료를 운영 검증 완료로 표시하지 않습니다.
+**Windows EXE의 실제 실행, 네이티브 DPAPI·파일 잠금·ACL·사내 WEC8500/AP 검증은 사용자 별도 확인 범위입니다.** 실행파일은 디지털 서명이 없습니다. 개발 완료를 운영 검증 완료로 표시하지 않습니다.
 
 ## 설치 및 주의
 
